@@ -14,6 +14,7 @@ Variables → SESSION_STRING.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -31,7 +32,7 @@ def _ask(prompt: str) -> str:
     return value
 
 
-def main() -> None:
+async def run() -> None:
     dotenv_path = Path(".env")
     if dotenv_path.exists():
         load_dotenv(dotenv_path)
@@ -54,9 +55,13 @@ def main() -> None:
     print("Подключаюсь к Telegram. Сейчас спросят телефон / код / 2FA.")
     print()
 
-    with TelegramClient(StringSession(), api_id, api_hash) as client:
-        me = client.get_me()
+    client = TelegramClient(StringSession(), api_id, api_hash)
+    await client.start()
+    try:
+        me = await client.get_me()
         session_string = client.session.save()
+    finally:
+        await client.disconnect()
 
     print()
     print("=" * 72)
@@ -77,4 +82,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(run())
