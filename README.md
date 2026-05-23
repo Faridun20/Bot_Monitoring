@@ -181,7 +181,6 @@ ruff format --check .
 ├── .python-version
 ├── Procfile
 ├── README.md
-├── nixpacks.toml
 ├── pyproject.toml
 ├── railway.json
 ├── requirements.txt
