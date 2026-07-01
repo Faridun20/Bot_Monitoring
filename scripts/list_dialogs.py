@@ -19,6 +19,11 @@ from dotenv import load_dotenv
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
+# На Windows stdout по умолчанию в cp1251 — переключаем в UTF-8,
+# иначе имена с эмодзи/спец-символами падают с UnicodeEncodeError.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 def _require(name: str) -> str:
     v = os.environ.get(name, "").strip()
