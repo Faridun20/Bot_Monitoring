@@ -10,6 +10,7 @@ from telethon.errors import (
     ChatSendPhotosForbiddenError,
     ChatWriteForbiddenError,
     FloodWaitError,
+    PeerFloodError,
     SlowModeWaitError,
 )
 
@@ -153,6 +154,17 @@ async def test_media_forbidden_no_caption_gives_up(client, cfg):
     assert ok is False
     client.send_file.assert_awaited_once()
     client.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_peer_flood_propagates_instead_of_swallowed(client, cfg):
+    """PeerFloodError = аккаунт под ограничением целиком, не проблема чата —
+    send_to должен пробросить исключение наверх, а не вернуть False."""
+    err = _make_error(PeerFloodError)
+    client.send_message.side_effect = err
+    with pytest.raises(PeerFloodError):
+        await send_to(client, "@chat", Post(text="x", media=None, source_id=1), cfg)
+    assert client.send_message.await_count == 1
 
 
 @pytest.mark.asyncio

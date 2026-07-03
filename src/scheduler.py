@@ -8,6 +8,7 @@ import random
 from typing import TYPE_CHECKING
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from telethon.errors import PeerFloodError
 
 from .posts import load_active_posts, pick_random_post
 from .sender import send_to
@@ -56,7 +57,17 @@ async def broadcast(client: TelegramClient, cfg: Config) -> None:
     sent = 0
     total = len(groups)
     for i, chat in enumerate(groups):
-        ok = await send_to(client, chat, post, cfg)
+        try:
+            ok = await send_to(client, chat, post, cfg)
+        except PeerFloodError:
+            log.error(
+                "broadcast прерван из-за PeerFloodError: %d/%d успели отправить "
+                "до ограничения, остальные %d чатов пропущены",
+                sent,
+                total,
+                total - i,
+            )
+            return
         if ok:
             sent += 1
         # Пауза только между группами, не после последней.

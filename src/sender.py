@@ -16,6 +16,7 @@ from telethon.errors import (
     ChatSendVoicesForbiddenError,
     ChatWriteForbiddenError,
     FloodWaitError,
+    PeerFloodError,
     SlowModeWaitError,
     UserBannedInChannelError,
 )
@@ -144,6 +145,18 @@ async def send_to(
                 type(e).__name__,
             )
             return False
+
+        except PeerFloodError:
+            # Telegram считает аккаунт спамером и блокирует ЛЮБЫЕ дальнейшие
+            # сообщения новым чатам — это не проблема конкретного чата, а
+            # ограничение на весь аккаунт. Долбить остальные чаты в списке
+            # только продлит бан. Пробрасываем наверх, чтобы broadcast()
+            # прервал рассылку целиком, а не просто пропустил этот чат.
+            log.error(
+                "PeerFloodError в %s — Telegram ограничил аккаунт за спам-паттерн",
+                chat,
+            )
+            raise
 
         except Exception:
             log.exception("неожиданная ошибка при отправке в %s", chat)
