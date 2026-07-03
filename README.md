@@ -1,8 +1,9 @@
 # Telegram userbot для автопостинга в свои группы
 
 Постит 2 раза в день одинаковые/чередующиеся сообщения **с твоего личного
-аккаунта** (через Telethon / User API) в список твоих же групп. Хостится на
-Railway как long-running worker.
+аккаунта** (через Telethon / User API) в список твоих же групп. Работает как
+long-running процесс — на Railway или на своей VPS (например, Oracle Cloud
+Free Tier) через systemd.
 
 ## Что это и зачем
 
@@ -71,6 +72,95 @@ Railway как long-running worker.
    ```
 6. **Healthcheck не нужен** — это worker, не web-сервис.
 
+## Деплой на Oracle Cloud Free Tier (VPS)
+
+В отличие от Railway это настоящая машина: она не передеплоивается сама по
+`git push` и не перезапускает упавший процесс сама по себе. Оба момента
+закрывает systemd.
+
+### 1. Создать инстанс
+
+- Oracle Cloud Console → Compute → Instances → **Create Instance**.
+- Image: Ubuntu 22.04 или 24.04 (входит в Always Free).
+- Shape: любой Always Free — `VM.Standard.A1.Flex` (ARM) или
+  `VM.Standard.E2.1.Micro` (AMD). Все зависимости проекта — чистый Python,
+  архитектура значения не имеет.
+- Добавь свой SSH-ключ при создании инстанса.
+- Сеть трогать не нужно: бот не принимает входящие соединения (только
+  исходящие к серверам Telegram), поэтому кроме порта 22 (SSH, открыт по
+  умолчанию) ничего открывать не требуется.
+
+### 2. Подключиться и подготовить окружение
+
+```bash
+ssh ubuntu@<PUBLIC_IP>
+
+sudo apt update && sudo apt install -y python3 python3-venv git
+
+git clone https://github.com/Faridun20/Bot_Monitoring.git
+cd Bot_Monitoring
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 3. Заполнить `.env`
+
+```bash
+cp .env.example .env
+nano .env       # заполни как локально: API_ID, API_HASH, SESSION_STRING,
+                 # TARGET_GROUPS, DRAFTS_SOURCE, SCHEDULE, TIMEZONE
+chmod 600 .env   # секреты — читать может только владелец файла
+```
+
+`config.py` подхватывает `.env` из текущей директории точно так же, как при
+локальном запуске — на VPS ничего доопределять не нужно.
+
+### 4. Запустить как systemd-сервис
+
+В репозитории уже лежит шаблон [`userbot.service`](userbot.service).
+
+```bash
+sudo cp userbot.service /etc/systemd/system/
+sudo nano /etc/systemd/system/userbot.service   # поправь User= и пути, если
+                                                  # клонировал не в
+                                                  # /home/ubuntu/Bot_Monitoring
+sudo systemctl daemon-reload
+sudo systemctl enable --now userbot
+```
+
+`enable` — чтобы бот поднимался сам после перезагрузки сервера. `Restart=on-failure`
+в юните — чтобы перезапускался при падении (аналог `restartPolicyType` в Railway).
+
+### 5. Логи
+
+```bash
+sudo journalctl -u userbot -f
+```
+
+Должно быть то же самое, что и локально: `Authorized as ...`,
+`Scheduler started: ...`.
+
+### 6. Обновление
+
+Посты — как обычно, через drafts-канал, без каких-либо действий на сервере.
+Если поменялся код:
+
+```bash
+cd ~/Bot_Monitoring
+git pull
+source .venv/bin/activate && pip install -r requirements.txt   # если requirements.txt менялся
+sudo systemctl restart userbot
+```
+
+### ⚠️ Не запускай бота в двух местах одновременно
+
+Если переезжаешь с Railway на Oracle — **останови или удали Railway-сервис**
+перед стартом на VPS. Оба процесса используют один и тот же `SESSION_STRING`
+и независимо друг от друга поднимут свой `AsyncIOScheduler` — в 10:00/19:30
+пост уйдёт **дважды** в каждую группу.
+
 ## Добавление и редактирование постов
 
 Источник постов — **приватный Telegram-канал**, в который пишешь только ты.
@@ -85,8 +175,8 @@ Railway как long-running worker.
    [@username_to_id_bot](https://t.me/username_to_id_bot) или
    [@JsonDumpBot](https://t.me/JsonDumpBot) — они вернут ID вида
    `-1001234567890`.
-3. Положи это значение в `DRAFTS_SOURCE` (локально в `.env`, на проде в
-   Railway → Variables).
+3. Положи это значение в `DRAFTS_SOURCE` (локально в `.env`; на проде — в
+   Railway → Variables или в `.env` на сервере).
 
 ### Каждый день
 
@@ -119,8 +209,8 @@ Userbot перед каждой плановой рассылкой читает
 
 - Никогда не коммить `SESSION_STRING` в репозиторий.
 - Никогда не пересылай её в чаты, не вставляй в issue/PR/комментарии.
-- Храни только в Railway → Variables (и локально в `.env`, который покрыт
-  `.gitignore`).
+- Храни только в Railway → Variables или в `.env` на сервере (с правами
+  `chmod 600`) — и локально в `.env`, который покрыт `.gitignore`.
 - Если случайно засветил — открой Telegram → Settings → Devices → **Terminate
   session** для этой сессии, и сразу перегенерируй через
   `python scripts/generate_session.py`.
@@ -185,6 +275,7 @@ ruff format --check .
 ├── railway.json
 ├── requirements.txt
 ├── requirements-dev.txt
+├── userbot.service      # systemd-юнит для деплоя на VPS
 ├── scripts/
 │   └── generate_session.py
 ├── src/
@@ -205,6 +296,8 @@ ruff format --check .
 
 - Не использует Bot API — только User API через Telethon.
 - Не пишет ни в какие группы, кроме указанных в `TARGET_GROUPS`.
-- Не хранит сессию в файле (Railway эфемерный) — только `StringSession` из env.
-- Не пишет логи в файл — только stdout (Railway собирает сам).
+- Не хранит Telethon-сессию в файле — только `StringSession` из env, работает
+  одинаково локально / на Railway / на VPS.
+- Не пишет логи в файл — только stdout (Railway или journalctl/systemd
+  собирают сами).
 - Не имеет веб-морды / БД / Redis / Docker — для текущего объёма это лишнее.
