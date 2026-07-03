@@ -8,6 +8,12 @@ from typing import TYPE_CHECKING
 
 from telethon.errors import (
     ChannelPrivateError,
+    ChatSendGifsForbiddenError,
+    ChatSendMediaForbiddenError,
+    ChatSendPhotosForbiddenError,
+    ChatSendStickersForbiddenError,
+    ChatSendVideosForbiddenError,
+    ChatSendVoicesForbiddenError,
     ChatWriteForbiddenError,
     FloodWaitError,
     SlowModeWaitError,
@@ -22,14 +28,32 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# Чат запрещает конкретно этот тип вложения (фото/видео/гиф/...), но обычный
+# текст обычно всё равно проходит — есть смысл повторить постом без медиа,
+# а не сразу сдаваться.
+_MEDIA_FORBIDDEN_ERRORS = (
+    ChatSendMediaForbiddenError,
+    ChatSendPhotosForbiddenError,
+    ChatSendGifsForbiddenError,
+    ChatSendVideosForbiddenError,
+    ChatSendVoicesForbiddenError,
+    ChatSendStickersForbiddenError,
+)
 
-async def _send_once(client: TelegramClient, chat: str | int, post: Post) -> None:
+
+async def _send_once(
+    client: TelegramClient,
+    chat: str | int,
+    post: Post,
+    *,
+    text_only: bool = False,
+) -> None:
     """Один сырой вызов send_* без обработки ошибок.
 
     Telethon принимает `msg.media` напрямую в `send_file` — внутри он
     переотправляет media по ссылке на серверах TG, ничего не скачивая.
     """
-    if post.media is not None:
+    if post.media is not None and not text_only:
         await client.send_file(
             chat,
             file=post.media,
@@ -47,12 +71,37 @@ async def send_to(
 ) -> bool:
     """Отправить пост в чат. Возвращает True при успехе, False при отказе."""
     flood_retries_left = 1
+    text_only = False
 
     while True:
         try:
-            await _send_once(client, chat, post)
-            log.info("sent to %s", chat)
+            await _send_once(client, chat, post, text_only=text_only)
+            log.info("sent to %s%s", chat, " (только текстом)" if text_only else "")
             return True
+
+        except _MEDIA_FORBIDDEN_ERRORS as e:
+            if text_only or post.media is None:
+                # Уже пробовали без медиа, либо это и так был текст — сдаёмся.
+                log.warning(
+                    "медиа запрещено в %s (%s), альтернативы нет — пропускаю",
+                    chat,
+                    type(e).__name__,
+                )
+                return False
+            if not post.text:
+                log.warning(
+                    "медиа запрещено в %s (%s), а текста для фолбэка нет — пропускаю",
+                    chat,
+                    type(e).__name__,
+                )
+                return False
+            log.warning(
+                "медиа запрещено в %s (%s) — повторяю только текстом",
+                chat,
+                type(e).__name__,
+            )
+            text_only = True
+            continue
 
         except SlowModeWaitError as e:
             if e.seconds <= cfg.max_slow_mode_wait:

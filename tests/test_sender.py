@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from telethon.errors import (
+    ChatSendPhotosForbiddenError,
     ChatWriteForbiddenError,
     FloodWaitError,
     SlowModeWaitError,
@@ -128,6 +129,30 @@ async def test_flood_wait_twice_gives_up(client, cfg):
     ok = await send_to(client, "@chat", Post(text="x", media=None, source_id=1), cfg)
     assert ok is False
     assert client.send_message.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_media_forbidden_falls_back_to_text(client, cfg):
+    media = MagicMock(name="MessageMediaPhoto")
+    err = _make_error(ChatSendPhotosForbiddenError)
+    client.send_file.side_effect = err
+    post = Post(text="caption", media=media, source_id=4)
+    ok = await send_to(client, "@chat", post, cfg)
+    assert ok is True
+    client.send_file.assert_awaited_once_with("@chat", file=media, caption="caption")
+    client.send_message.assert_awaited_once_with("@chat", "caption")
+
+
+@pytest.mark.asyncio
+async def test_media_forbidden_no_caption_gives_up(client, cfg):
+    media = MagicMock(name="MessageMediaPhoto")
+    err = _make_error(ChatSendPhotosForbiddenError)
+    client.send_file.side_effect = err
+    post = Post(text="", media=media, source_id=5)
+    ok = await send_to(client, "@chat", post, cfg)
+    assert ok is False
+    client.send_file.assert_awaited_once()
+    client.send_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio
