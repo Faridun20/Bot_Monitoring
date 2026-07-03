@@ -9,6 +9,10 @@ signal handlers — только чистый broadcast().
 
 Прежде чем запускать: убедись, что в TARGET_GROUPS сейчас стоит ТОЛЬКО
 твой тестовый чат, а не боевые каналы — иначе улетит в прод.
+
+Если в TARGET_GROUPS больше 3 чатов, скрипт распечатает список и попросит
+явно набрать "ОТПРАВИТЬ" перед реальной отправкой — это не автоматика,
+собьётся на любой другой ввод или Ctrl+C.
 """
 
 from __future__ import annotations
@@ -38,10 +42,20 @@ async def run() -> None:
     log.info("TEST: target_groups=%s, drafts=%s", cfg.target_groups, cfg.drafts_source)
 
     if len(cfg.target_groups) > 3:
-        log.warning(
-            "TEST: в TARGET_GROUPS %d чатов — уверен, что все тестовые?",
-            len(cfg.target_groups),
+        print()
+        print(f"⚠️  TARGET_GROUPS содержит {len(cfg.target_groups)} чатов:")
+        for g in cfg.target_groups:
+            print(f"    {g}")
+        print()
+        print("Этот скрипт шлёт РЕАЛЬНЫЙ пост прямо сейчас, без расписания и jitter'а.")
+        answer = input(
+            "Наберите ОТПРАВИТЬ заглавными, чтобы продолжить, или что угодно ещё — отмена: "
         )
+        if answer.strip() != "ОТПРАВИТЬ":
+            log.warning(
+                "TEST: отменено пользователем (%d чатов, не подтверждено).", len(cfg.target_groups)
+            )
+            return
 
     client = TelegramClient(
         StringSession(cfg.session_string),
