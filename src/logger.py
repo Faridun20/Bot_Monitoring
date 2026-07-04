@@ -14,6 +14,12 @@ def setup_logging(level: str = "INFO") -> None:
     for h in list(root.handlers):
         root.removeHandler(h)
 
+    # На Windows stdout по умолчанию в cp1251 — переключаем в UTF-8,
+    # иначе кириллица в сообщениях лога превращается в кракозябры.
+    # На Railway/Linux stdout уже UTF-8, reconfigure — no-op.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     handler = logging.StreamHandler(stream=sys.stdout)
     handler.setFormatter(
         logging.Formatter(
