@@ -50,6 +50,10 @@ async def main() -> None:
             len(cfg.target_groups),
             cfg.drafts_source,
         )
+        # Полный список печатаем отдельной строкой — это единственная
+        # проверка перед автоматической отправкой, никакого подтверждения
+        # рассылка не спрашивает. Сверяй глазами при каждом рестарте.
+        log.info("TARGET_GROUPS: %s", cfg.target_groups)
 
         # Graceful shutdown по SIGTERM/SIGINT (Railway шлёт SIGTERM при редеплое).
         stop_event = asyncio.Event()
