@@ -70,21 +70,44 @@ async def load_active_posts(
     return posts
 
 
-def pick_random_post(posts: list[Post], exclude_id: int | None = None) -> Post:
-    """Выбрать случайный пост.
+def pick_next_post(
+    posts: list[Post],
+    deck: list[int],
+    last_id: int | None = None,
+) -> tuple[Post, list[int]]:
+    """Выбрать следующий пост честной ротацией, без чистой случайности.
 
-    Если активных постов больше одного, не повторяет `exclude_id` (обычно —
-    id поста из предыдущей рассылки). Без этого при нескольких активных
-    постах чистая случайность могла выбрать один и тот же пост несколько
-    раз подряд — а нужно, чтобы со временем реально чередовались разные.
+    `deck` — оставшийся порядок id постов текущего цикла перемешивания.
+    Вызывающий код (scheduler.broadcast) хранит его между вызовами и
+    передаёт обратно — так за один проход колоды каждый активный пост
+    отправится ровно один раз, прежде чем кто-то повторится.
+
+    Когда колода пуста (первый запуск, или весь цикл пройден) — она
+    перемешивается заново из текущих активных постов. Посты, которых
+    больше нет среди активных (сняли тег), тихо вычищаются из колоды.
+
+    `last_id` (id поста из предыдущей рассылки) нужен только для одного
+    случая — чтобы на стыке двух циклов перемешивания новая колода не
+    начиналась тем же постом, которым закончилась предыдущая.
+
+    Возвращает (выбранный пост, обновлённая колода без него).
     """
     if not posts:
         raise RuntimeError(
             "В drafts-канале нет постов с активным хэштегом. "
             "Добавь хотя бы одно сообщение с тегом и повтори."
         )
-    if exclude_id is not None and len(posts) > 1:
-        candidates = [p for p in posts if p.source_id != exclude_id]
-        if candidates:
-            return random.choice(candidates)
-    return random.choice(posts)
+
+    by_id = {p.source_id: p for p in posts}
+    current_ids = set(by_id)
+
+    deck = [pid for pid in deck if pid in current_ids]
+
+    if not deck:
+        deck = list(current_ids)
+        random.shuffle(deck)
+        if last_id is not None and len(deck) > 1 and deck[0] == last_id:
+            deck[0], deck[1] = deck[1], deck[0]
+
+    next_id = deck.pop(0)
+    return by_id[next_id], deck

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telethon.errors import PeerFloodError
 
-from .posts import load_active_posts, pick_random_post
+from .posts import load_active_posts, pick_next_post
 from .sender import send_to
 
 if TYPE_CHECKING:
@@ -20,15 +20,18 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# id последнего отправленного поста — чтобы pick_random_post не повторял его
-# сразу же на следующей рассылке, если активных постов несколько. Живёт
-# в памяти процесса; после рестарта просто забывается, это не страшно.
+# Состояние ротации постов между вызовами broadcast(): _post_deck — порядок
+# id текущего цикла перемешивания (см. pick_next_post), _last_sent_id — id
+# последнего отправленного, нужен только чтобы не повторить пост на стыке
+# двух циклов. Живёт в памяти процесса; после рестарта просто обнуляется —
+# не страшно, это не гарантия на всю жизнь бота, а защита от явных повторов.
+_post_deck: list[int] = []
 _last_sent_id: int | None = None
 
 
 async def broadcast(client: TelegramClient, cfg: Config) -> None:
     """Одна итерация рассылки: один пост во все группы с задержками."""
-    global _last_sent_id
+    global _post_deck, _last_sent_id
 
     if cfg.jitter_minutes > 0:
         jitter = random.uniform(0, cfg.jitter_minutes * 60)
@@ -42,7 +45,7 @@ async def broadcast(client: TelegramClient, cfg: Config) -> None:
             cfg.drafts_scan_limit,
             cfg.active_tag,
         )
-        post = pick_random_post(posts, exclude_id=_last_sent_id)
+        post, _post_deck = pick_next_post(posts, _post_deck, last_id=_last_sent_id)
     except RuntimeError as e:
         log.warning("Skip broadcast: %s", e)
         return

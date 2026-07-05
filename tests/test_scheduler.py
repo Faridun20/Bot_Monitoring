@@ -34,10 +34,12 @@ def _no_sleep():
 
 
 @pytest.fixture(autouse=True)
-def _reset_last_sent_id():
-    """_last_sent_id — глобальное состояние модуля, тесты не должны его делить."""
+def _reset_rotation_state():
+    """_post_deck/_last_sent_id — глобальное состояние модуля, тесты его не делят."""
+    scheduler_module._post_deck = []
     scheduler_module._last_sent_id = None
     yield
+    scheduler_module._post_deck = []
     scheduler_module._last_sent_id = None
 
 
@@ -58,7 +60,7 @@ async def test_peer_flood_stops_remaining_chats():
 
     with (
         patch("src.scheduler.load_active_posts", new=AsyncMock(return_value=[post])),
-        patch("src.scheduler.pick_random_post", return_value=post),
+        patch("src.scheduler.pick_next_post", return_value=(post, [])),
         patch(
             "src.scheduler.send_to",
             new=AsyncMock(side_effect=[True, flood]),
@@ -70,20 +72,24 @@ async def test_peer_flood_stops_remaining_chats():
 
 
 @pytest.mark.asyncio
-async def test_second_broadcast_excludes_previously_sent_post_id():
-    """При нескольких активных постах второй broadcast() не должен просить
-    pick_random_post повторить пост, отправленный в первом вызове."""
+async def test_broadcast_threads_deck_and_last_id_across_calls():
+    """Второй broadcast() должен получить колоду, оставшуюся от первого
+    вызова, и exclude-по-стыку id поста, отправленного в первом вызове —
+    это то, что реально даёт честную ротацию между вызовами."""
     cfg = FakeConfig(target_groups=["@a"])
     post1 = Post(text="first", media=[], source_id=1)
     post2 = Post(text="second", media=[], source_id=2)
 
     with (
         patch("src.scheduler.load_active_posts", new=AsyncMock(return_value=[post1, post2])),
-        patch("src.scheduler.pick_random_post", side_effect=[post1, post2]) as mock_pick,
+        patch(
+            "src.scheduler.pick_next_post",
+            side_effect=[(post1, [2]), (post2, [])],
+        ) as mock_pick,
         patch("src.scheduler.send_to", new=AsyncMock(return_value=True)),
     ):
         await broadcast(AsyncMock(), cfg)
         await broadcast(AsyncMock(), cfg)
 
-    assert mock_pick.call_args_list[0] == call([post1, post2], exclude_id=None)
-    assert mock_pick.call_args_list[1] == call([post1, post2], exclude_id=1)
+    assert mock_pick.call_args_list[0] == call([post1, post2], [], last_id=None)
+    assert mock_pick.call_args_list[1] == call([post1, post2], [2], last_id=1)

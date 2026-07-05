@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.posts import Post, load_active_posts, pick_random_post
+from src.posts import Post, load_active_posts, pick_next_post
 
 
 def _msg(msg_id: int, raw_text: str | None, media=None, grouped_id: int | None = None) -> MagicMock:
@@ -153,32 +153,68 @@ async def test_album_without_tag_is_skipped():
     assert posts == []
 
 
-def test_pick_random_post_empty_raises():
+def test_pick_next_post_empty_raises():
     with pytest.raises(RuntimeError, match="нет постов с активным хэштегом"):
-        pick_random_post([])
+        pick_next_post([], [])
 
 
-def test_pick_random_post_returns_member():
+def test_pick_next_post_returns_member_and_updates_deck():
     posts = [
         Post(text="a", media=[], source_id=1),
         Post(text="b", media=[], source_id=2),
     ]
-    p = pick_random_post(posts)
-    assert p in posts
+    post, deck = pick_next_post(posts, [])
+    assert post in posts
+    assert deck == [p.source_id for p in posts if p.source_id != post.source_id]
 
 
-def test_pick_random_post_avoids_immediate_repeat():
+def test_pick_next_post_full_cycle_uses_each_post_exactly_once():
+    """За N вызовов подряд (N = число активных постов) без внешнего сброса
+    колоды каждый пост встречается ровно один раз — честная ротация, не
+    чистая случайность с возможными повторами."""
+    posts = [Post(text=str(i), media=[], source_id=i) for i in range(1, 6)]
+    deck: list[int] = []
+    seen = []
+    for _ in range(len(posts)):
+        post, deck = pick_next_post(posts, deck)
+        seen.append(post.source_id)
+    assert sorted(seen) == [1, 2, 3, 4, 5]
+    assert deck == []
+
+
+def test_pick_next_post_no_repeat_across_cycle_boundary():
+    """3 активных поста, 3 полных цикла подряд (9 вызовов) — ни разу подряд
+    не повторяется тот же пост, даже на стыке между циклами перемешивания."""
+    posts = [Post(text=str(i), media=[], source_id=i) for i in (1, 2, 3)]
+    deck: list[int] = []
+    last_id = None
+    picks = []
+    for _ in range(9):
+        post, deck = pick_next_post(posts, deck, last_id=last_id)
+        picks.append(post.source_id)
+        last_id = post.source_id
+
+    assert all(a != b for a, b in zip(picks, picks[1:]))
+    assert sorted(picks[0:3]) == [1, 2, 3]
+    assert sorted(picks[3:6]) == [1, 2, 3]
+    assert sorted(picks[6:9]) == [1, 2, 3]
+
+
+def test_pick_next_post_deck_drops_deactivated_posts():
+    """id в колоде, которого больше нет среди активных (сняли тег) —
+    просто вычищается, не роняет функцию и не выбирается."""
     posts = [
         Post(text="a", media=[], source_id=1),
         Post(text="b", media=[], source_id=2),
     ]
-    p = pick_random_post(posts, exclude_id=1)
-    assert p.source_id == 2
+    post, deck = pick_next_post(posts, deck=[999, 1, 2])
+    assert post.source_id == 1
+    assert deck == [2]
 
 
-def test_pick_random_post_exclude_id_ignored_when_only_option():
+def test_pick_next_post_single_post_repeats_when_no_alternative():
     """Единственный активный пост — не пропускать рассылку только потому,
-    что он же был выбран прошлый раз."""
+    что он же был выбран прошлый раз, повторов избежать физически нельзя."""
     posts = [Post(text="a", media=[], source_id=1)]
-    p = pick_random_post(posts, exclude_id=1)
-    assert p.source_id == 1
+    post, deck = pick_next_post(posts, [], last_id=1)
+    assert post.source_id == 1
