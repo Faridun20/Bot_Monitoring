@@ -53,11 +53,15 @@ async def _send_once(
 
     Telethon принимает `msg.media` напрямую в `send_file` — внутри он
     переотправляет media по ссылке на серверах TG, ничего не скачивая.
+    Список из 2+ media Telethon отправляет альбомом одним сообщением;
+    список из 1 разворачиваем в голый объект — так `send_file` ведёт себя
+    как обычная одиночная фотка/видео, а не альбом на одну карточку.
     """
-    if post.media is not None and not text_only:
+    if post.media and not text_only:
+        file = post.media[0] if len(post.media) == 1 else post.media
         await client.send_file(
             chat,
-            file=post.media,
+            file=file,
             caption=post.text or None,
         )
         return
@@ -81,7 +85,7 @@ async def send_to(
             return True
 
         except _MEDIA_FORBIDDEN_ERRORS as e:
-            if text_only or post.media is None:
+            if text_only or not post.media:
                 # Уже пробовали без медиа, либо это и так был текст — сдаёмся.
                 log.warning(
                     "медиа запрещено в %s (%s), альтернативы нет — пропускаю",

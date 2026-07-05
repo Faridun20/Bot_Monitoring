@@ -20,9 +20,16 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# id последнего отправленного поста — чтобы pick_random_post не повторял его
+# сразу же на следующей рассылке, если активных постов несколько. Живёт
+# в памяти процесса; после рестарта просто забывается, это не страшно.
+_last_sent_id: int | None = None
+
 
 async def broadcast(client: TelegramClient, cfg: Config) -> None:
     """Одна итерация рассылки: один пост во все группы с задержками."""
+    global _last_sent_id
+
     if cfg.jitter_minutes > 0:
         jitter = random.uniform(0, cfg.jitter_minutes * 60)
         log.info("broadcast: jitter %.1fs", jitter)
@@ -35,7 +42,7 @@ async def broadcast(client: TelegramClient, cfg: Config) -> None:
             cfg.drafts_scan_limit,
             cfg.active_tag,
         )
-        post = pick_random_post(posts)
+        post = pick_random_post(posts, exclude_id=_last_sent_id)
     except RuntimeError as e:
         log.warning("Skip broadcast: %s", e)
         return
@@ -43,11 +50,13 @@ async def broadcast(client: TelegramClient, cfg: Config) -> None:
         log.exception("Failed to load posts from drafts channel")
         return
 
+    _last_sent_id = post.source_id
+
     log.info(
-        "Picked post id=%s from drafts, text_len=%d, has_media=%s",
+        "Picked post id=%s from drafts, text_len=%d, media_count=%d",
         post.source_id,
         len(post.text),
-        post.media is not None,
+        len(post.media),
     )
 
     groups: list[str | int] = list(cfg.target_groups)
