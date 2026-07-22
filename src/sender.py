@@ -57,15 +57,27 @@ async def _send_once(
     список из 1 разворачиваем в голый объект — так `send_file` ведёт себя
     как обычная одиночная фотка/видео, а не альбом на одну карточку.
     """
+    # parse_mode=None обязателен, даже когда post.entities пуст: у send_file
+    # проверка на formatting_entities "истинностная" (`if formatting_entities:`),
+    # то есть пустой список сам по себе re-parse текста как markdown не отключает.
+    # Только явный parse_mode=None гарантированно отключает повторный парсинг
+    # во всех трёх путях отправки (send_message, send_file одиночный, альбом).
     if post.media and not text_only:
         file = post.media[0] if len(post.media) == 1 else post.media
         await client.send_file(
             chat,
             file=file,
             caption=post.text or None,
+            formatting_entities=post.entities,
+            parse_mode=None,
         )
         return
-    await client.send_message(chat, post.text)
+    await client.send_message(
+        chat,
+        post.text,
+        formatting_entities=post.entities,
+        parse_mode=None,
+    )
 
 
 async def send_to(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
@@ -9,13 +10,20 @@ import pytest
 from src.posts import Post, load_active_posts, pick_next_post
 
 
-def _msg(msg_id: int, raw_text: str | None, media=None, grouped_id: int | None = None) -> MagicMock:
+def _msg(
+    msg_id: int,
+    raw_text: str | None,
+    media=None,
+    grouped_id: int | None = None,
+    entities=None,
+) -> MagicMock:
     """Сделать минимальный mock telethon.tl.custom.message.Message."""
     m = MagicMock(name=f"Message#{msg_id}")
     m.id = msg_id
     m.raw_text = raw_text
     m.media = media
     m.grouped_id = grouped_id
+    m.entities = entities
     return m
 
 
@@ -57,6 +65,55 @@ async def test_tag_stripped_from_text():
     posts = await load_active_posts(client, "@drafts", 500, "#active")
     assert len(posts) == 1
     assert posts[0].text == "Привет"
+
+
+@dataclass
+class _FakeEntity:
+    """Мини-заглушка telethon MessageEntity* — только offset/length, как в strip_tag."""
+
+    offset: int
+    length: int
+
+
+@pytest.mark.asyncio
+async def test_entities_carried_and_offsets_adjusted_when_tag_stripped():
+    bold = _FakeEntity(offset=0, length=4)  # покрывает "Пост"
+    client = _client_with_messages([_msg(1, "Пост #active", entities=[bold])])
+    posts = await load_active_posts(client, "@drafts", 500, "#active")
+    assert len(posts) == 1
+    assert posts[0].text == "Пост"
+    assert posts[0].entities == [_FakeEntity(offset=0, length=4)]
+
+
+@pytest.mark.asyncio
+async def test_entities_missing_attribute_on_message_defaults_to_empty():
+    """Сообщение вообще без атрибута entities — не падаем, Post.entities == []."""
+    m = _msg(1, "без entities #active")
+    del m.entities
+    client = _client_with_messages([m])
+    posts = await load_active_posts(client, "@drafts", 500, "#active")
+    assert len(posts) == 1
+    assert posts[0].entities == []
+
+
+@pytest.mark.asyncio
+async def test_album_entities_come_from_captioned_message():
+    """Entities должны браться с того же сообщения альбома, что дало подпись,
+    а не с другого сообщения в группе."""
+    photo1 = MagicMock(name="Photo1")
+    photo2 = MagicMock(name="Photo2")
+    caption_bold = _FakeEntity(offset=0, length=7)  # покрывает "Реклама"
+    other_bold = _FakeEntity(offset=0, length=99)  # на сообщении без caption
+    messages = [
+        _msg(11, "Реклама #active", media=photo2, grouped_id=100, entities=[caption_bold]),
+        _msg(10, None, media=photo1, grouped_id=100, entities=[other_bold]),
+    ]
+    client = _client_with_messages(messages)
+
+    posts = await load_active_posts(client, "@drafts", 500, "#active")
+
+    assert len(posts) == 1
+    assert posts[0].entities == [_FakeEntity(offset=0, length=7)]
 
 
 @pytest.mark.asyncio

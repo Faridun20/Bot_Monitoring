@@ -8,8 +8,10 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+from .entities import strip_tag
 
 if TYPE_CHECKING:
     from telethon import TelegramClient
@@ -20,6 +22,7 @@ class Post:
     text: str
     media: list[Any]
     source_id: int
+    entities: list[Any] = field(default_factory=list)
 
 
 async def load_active_posts(
@@ -54,18 +57,20 @@ async def load_active_posts(
     for msgs in singles + list(groups.values()):
         msgs = sorted(msgs, key=lambda m: m.id)
         raw = ""
+        raw_entities: list = []
         for m in msgs:
             t = getattr(m, "raw_text", None)
             if t:
                 raw = t
+                raw_entities = list(getattr(m, "entities", None) or [])
                 break
         if active_tag not in raw:
             continue
-        clean = raw.replace(active_tag, "").strip()
+        clean, clean_entities = strip_tag(raw, raw_entities, active_tag)
         media = [m.media for m in msgs if getattr(m, "media", None) is not None]
         if not clean and not media:
             continue
-        posts.append(Post(text=clean, media=media, source_id=msgs[0].id))
+        posts.append(Post(text=clean, media=media, source_id=msgs[0].id, entities=clean_entities))
 
     return posts
 
