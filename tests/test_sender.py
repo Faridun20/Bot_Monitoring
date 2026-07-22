@@ -62,7 +62,9 @@ async def test_send_to_success_text(client, cfg):
     post = Post(text="hello", media=[], source_id=1)
     ok = await send_to(client, "@chat", post, cfg)
     assert ok is True
-    client.send_message.assert_awaited_once_with("@chat", "hello")
+    client.send_message.assert_awaited_once_with(
+        "@chat", "hello", formatting_entities=[], parse_mode=None
+    )
     client.send_file.assert_not_awaited()
 
 
@@ -72,7 +74,9 @@ async def test_send_to_with_media(client, cfg):
     post = Post(text="caption", media=[media], source_id=2)
     ok = await send_to(client, "@chat", post, cfg)
     assert ok is True
-    client.send_file.assert_awaited_once_with("@chat", file=media, caption="caption")
+    client.send_file.assert_awaited_once_with(
+        "@chat", file=media, caption="caption", formatting_entities=[], parse_mode=None
+    )
     client.send_message.assert_not_awaited()
 
 
@@ -83,7 +87,9 @@ async def test_send_to_media_without_caption_passes_none(client, cfg):
     post = Post(text="", media=[media], source_id=3)
     ok = await send_to(client, "@chat", post, cfg)
     assert ok is True
-    client.send_file.assert_awaited_once_with("@chat", file=media, caption=None)
+    client.send_file.assert_awaited_once_with(
+        "@chat", file=media, caption=None, formatting_entities=[], parse_mode=None
+    )
     client.send_message.assert_not_awaited()
 
 
@@ -97,9 +103,38 @@ async def test_send_to_with_album_passes_list(client, cfg):
     ok = await send_to(client, "@chat", post, cfg)
     assert ok is True
     client.send_file.assert_awaited_once_with(
-        "@chat", file=[photo1, photo2, photo3], caption="caption"
+        "@chat",
+        file=[photo1, photo2, photo3],
+        caption="caption",
+        formatting_entities=[],
+        parse_mode=None,
     )
     client.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_to_forwards_entities_unchanged_text(client, cfg):
+    """Post.entities должны уйти в send_message как есть, без потерь."""
+    bold = MagicMock(name="MessageEntityBold")
+    post = Post(text="hello", media=[], source_id=7, entities=[bold])
+    ok = await send_to(client, "@chat", post, cfg)
+    assert ok is True
+    client.send_message.assert_awaited_once_with(
+        "@chat", "hello", formatting_entities=[bold], parse_mode=None
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_to_forwards_entities_unchanged_media(client, cfg):
+    """То же самое, но через send_file (caption с entities)."""
+    bold = MagicMock(name="MessageEntityBold")
+    media = MagicMock(name="MessageMediaPhoto")
+    post = Post(text="caption", media=[media], source_id=8, entities=[bold])
+    ok = await send_to(client, "@chat", post, cfg)
+    assert ok is True
+    client.send_file.assert_awaited_once_with(
+        "@chat", file=media, caption="caption", formatting_entities=[bold], parse_mode=None
+    )
 
 
 @pytest.mark.asyncio
@@ -155,8 +190,12 @@ async def test_media_forbidden_falls_back_to_text(client, cfg):
     post = Post(text="caption", media=[media], source_id=4)
     ok = await send_to(client, "@chat", post, cfg)
     assert ok is True
-    client.send_file.assert_awaited_once_with("@chat", file=media, caption="caption")
-    client.send_message.assert_awaited_once_with("@chat", "caption")
+    client.send_file.assert_awaited_once_with(
+        "@chat", file=media, caption="caption", formatting_entities=[], parse_mode=None
+    )
+    client.send_message.assert_awaited_once_with(
+        "@chat", "caption", formatting_entities=[], parse_mode=None
+    )
 
 
 @pytest.mark.asyncio
